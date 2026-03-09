@@ -1,7 +1,11 @@
+import logging
 import socket
 import threading
 import paramiko
 import struct
+
+# Suppress Paramiko's built-in channel failure messages — we handle errors ourselves
+logging.getLogger("paramiko").setLevel(logging.CRITICAL)
 
 class SSHOverWebSocket:
     """
@@ -17,6 +21,7 @@ class SSHOverWebSocket:
 
     def start_ssh_transport(self):
         self.transport = paramiko.Transport(self.ws_socket)
+        self.transport.set_keepalive(60)  # send keepalive every 60s to detect dead connections
         self.transport.start_client()
         self.transport.auth_password(self.ssh_username, self.ssh_password)
         if not self.transport.is_authenticated():

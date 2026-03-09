@@ -53,7 +53,7 @@ class HttpPayloadStrategy(TunnelStrategy):
             proxy_port=self.cfg["PROXY_PORT"],
             target_host=self.cfg["TARGET_HOST"],
             target_port=self.cfg["TARGET_PORT"],
-            payload_template=self.cfg["PAYLOAD_TEMPLATE"],
+            payload_template=self.cfg["payload_template"],
             use_tls=False,
         )
 
@@ -74,7 +74,7 @@ class SNIFrontedStrategy(TunnelStrategy):
         tls_sock = ctx.wrap_socket(
             raw_sock,
             server_hostname=(
-                self.cfg.get("FRONT_DOMAIN") or self.cfg["PROXY_HOST"]
+                self.cfg.get("front_domain") or self.cfg["PROXY_HOST"]
             ),
         )
 
@@ -84,7 +84,7 @@ class SNIFrontedStrategy(TunnelStrategy):
             proxy_port=self.cfg["PROXY_PORT"],
             target_host=self.cfg["TARGET_HOST"],
             target_port=self.cfg["TARGET_PORT"],
-            payload_template=self.cfg["PAYLOAD_TEMPLATE"],
+            payload_template=self.cfg["payload_template"],
             sock=tls_sock,         # Re-use the already-encrypted socket
             use_tls=False,         # Don’t double-wrap
         )
