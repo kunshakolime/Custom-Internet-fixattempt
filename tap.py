@@ -22,14 +22,13 @@ from typing import List, Optional
 # --------------------------------------------------------------------------- #
 
 SETTINGS = {
-    "TUN2SOCKS_BIN":    os.path.join(os.path.dirname(os.path.abspath(__file__)), "tun2socks-windows-amd64.exe"),
+    "TUN2SOCKS_BIN":    os.path.join(os.path.dirname(os.path.abspath(__file__)), "badvpn-tun2socks.exe"),
     "TAP_ADAPTER_NAME": "tuntap0",
     "TAP_IP":           "10.0.0.1",
     "TAP_MASK":         "255.255.255.0",
     "TAP_GATEWAY":      "10.0.0.2",
     "TAP_METRIC":       5,
     "SOCKS_HOST":       "127.0.0.1",
-    "SOCKS_VERSION":    5,
     "REAL_GATEWAY":     "",   # Auto-detected if empty
 }
 
@@ -147,35 +146,53 @@ def restore_interface_metrics() -> None:
 #                         tun2socks + default route                           #
 # --------------------------------------------------------------------------- #
 
-def start_tun2socks(socks_port: int) -> None:
+def start_tun2socks(socks_port: int, udpgw_addr: str = "") -> None:
     global _tun2socks_proc
     bin_path = SETTINGS["TUN2SOCKS_BIN"]
     if not os.path.isfile(bin_path):
         raise FileNotFoundError(f"tun2socks not found at {bin_path!r}")
 
-    socks    = f"socks{SETTINGS['SOCKS_VERSION']}://{SETTINGS['SOCKS_HOST']}:{socks_port}"
-    log_path = os.path.join(os.path.dirname(bin_path), "tun2socks.log")
-    log_file = open(log_path, "w")
+    socks_addr = f"{SETTINGS['SOCKS_HOST']}:{socks_port}"
+    log_path   = os.path.join(os.path.dirname(bin_path), "tun2socks.log")
+    log_file   = open(log_path, "w")
 
-    cmd = [bin_path, "-device", SETTINGS["TAP_ADAPTER_NAME"], "-proxy", socks, "-loglevel", "error"]
-    print("[*] Starting tun2socks (log -> tun2socks.log)")
+    # Windows tundev format: tap0901:<name>:<TAP-IP>:<network>:<netmask>
+    tundev = (
+        f"tap0901:{SETTINGS['TAP_ADAPTER_NAME']}"
+        f":{SETTINGS['TAP_IP']}:10.0.0.0:{SETTINGS['TAP_MASK']}"
+    )
+
+    cmd = [
+        bin_path,
+        "--tundev",            tundev,
+        "--netif-ipaddr",      SETTINGS["TAP_GATEWAY"],  # virtual router, must differ from TAP_IP
+        "--netif-netmask",     SETTINGS["TAP_MASK"],
+        "--socks-server-addr", socks_addr,
+        "--loglevel",          "3",
+    ]
+    if udpgw_addr:
+        cmd += ["--udpgw-remote-server-addr", udpgw_addr]
+        print(f"[*] UDP via udpgw at {udpgw_addr}")
+
+    print("[*] Starting badvpn-tun2socks (log -> tun2socks.log)")
     _tun2socks_proc = subprocess.Popen(cmd, stdout=log_file, stderr=log_file)
 
 
 def wait_for_tun2socks_interface() -> str:
-    print("[*] Waiting for tun2socks tunnel interface ...")
+    print("[*] Waiting for badvpn-tun2socks to start ...")
     for _ in range(15):
         time.sleep(1)
         if _tun2socks_proc.poll() is not None:
-            raise RuntimeError("tun2socks exited during startup — check tun2socks.log")
+            raise RuntimeError("badvpn-tun2socks exited during startup — check tun2socks.log")
+        # badvpn uses the TAP adapter directly — look it up by name
         idx = _ps(
-            "Get-NetAdapter | Where-Object { $_.InterfaceDescription -like '*tun2socks*' "
-            "-or $_.Name -like '*tun2socks*' } | Select-Object -First 1 -ExpandProperty ifIndex"
+            f"Get-NetAdapter -Name '{SETTINGS['TAP_ADAPTER_NAME']}' "
+            f"-ErrorAction SilentlyContinue | Select-Object -ExpandProperty ifIndex"
         )
         if idx:
-            print(f"[+] tun2socks interface up (ifIndex={idx})")
+            print(f"[+] TAP interface ready (ifIndex={idx})")
             return idx
-    raise RuntimeError("tun2socks tunnel interface did not appear — check tun2socks.log")
+    raise RuntimeError("TAP interface did not appear — check tun2socks.log")
 
 
 def add_default_route(idx: str) -> None:
@@ -222,7 +239,7 @@ atexit.register(cleanup)
 #                          Public entry point (called by main.py)             #
 # --------------------------------------------------------------------------- #
 
-def run_tap(resolved_bypass_ips: List[str], socks_port: int) -> None:
+def run_tap(resolved_bypass_ips: List[str], socks_port: int, udpgw_addr: str = "") -> None:
     """
     Set up TAP routing.  Called by main.py after:
       - The SOCKS proxy is already listening on socks_port
@@ -231,8 +248,8 @@ def run_tap(resolved_bypass_ips: List[str], socks_port: int) -> None:
     Parameters
     ----------
     resolved_bypass_ips : list of IP strings that must bypass the tunnel
-                          (proxy host, target host, front domain, etc.)
     socks_port          : the local SOCKS port tun2socks should connect to
+    udpgw_addr          : "host:port" of udpgw on the remote server, or "" to disable
     """
     try:
         import ctypes
@@ -253,7 +270,7 @@ def run_tap(resolved_bypass_ips: List[str], socks_port: int) -> None:
         add_bypass_route(ip, real_gw)
 
     configure_tap_adapter()
-    start_tun2socks(socks_port)
+    start_tun2socks(socks_port, udpgw_addr)
     idx = wait_for_tun2socks_interface()
     raise_other_interface_metrics()
     add_default_route(idx)

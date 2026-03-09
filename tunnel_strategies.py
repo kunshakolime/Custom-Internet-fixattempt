@@ -9,32 +9,14 @@ from ws_tunnel import establish_ws_tunnel
 
 
 class TunnelStrategy(ABC):
-    """
-    Abstract Strategy that returns a connected *raw* socket ready for Paramiko.
-    """
-
     def __init__(self, cfg: Dict):
-        # Configuration is injected, avoiding global state.
         self.cfg = cfg
 
     @abstractmethod
-    def establish(self) -> socket.socket:   # pragma: no cover
-        """
-        Establish the tunnel and return an already-connected socket.
-        Must raise an exception on failure.
-        """
-        raise NotImplementedError
+    def establish(self) -> socket.socket: ...  # pragma: no cover
 
-
-# --------------------------------------------------------------------------- #
-#                             Concrete strategies                             #
-# --------------------------------------------------------------------------- #
 
 class DirectStrategy(TunnelStrategy):
-    """
-    Straight TCP connection to TARGET_HOST:TARGET_PORT.
-    """
-
     def establish(self) -> socket.socket:
         return socket.create_connection(
             (self.cfg["TARGET_HOST"], self.cfg["TARGET_PORT"])
@@ -42,11 +24,6 @@ class DirectStrategy(TunnelStrategy):
 
 
 class HttpPayloadStrategy(TunnelStrategy):
-    """
-    Default (legacy) mode: plain-text connection to PROXY_HOST where we run the
-    custom HTTP/WebSocket upgrade payload defined in CONFIG['PAYLOAD_TEMPLATE'].
-    """
-
     def establish(self) -> socket.socket:
         return establish_ws_tunnel(
             proxy_host=self.cfg["PROXY_HOST"],
@@ -59,14 +36,8 @@ class HttpPayloadStrategy(TunnelStrategy):
 
 
 class SNIFrontedStrategy(TunnelStrategy):
-    """
-    Like HttpPayloadStrategy but wrapped in TLS with an arbitrary SNI (domain
-    fronting).  The TLS layer hides the HTTP upgrade and the front domain can
-    be an unrelated host served by the same CDN.
-    """
-
     def establish(self) -> socket.socket:
-        # 1. Build a TLS socket to PROXY_HOST with forged SNI.
+        # TLS socket with forged SNI for domain fronting
         raw_sock = socket.create_connection(
             (self.cfg["PROXY_HOST"], self.cfg["PROXY_PORT"])
         )
@@ -90,17 +61,7 @@ class SNIFrontedStrategy(TunnelStrategy):
         )
 
 
-# --------------------------------------------------------------------------- #
-#                                Factory helper                               #
-# --------------------------------------------------------------------------- #
-
 def get_strategy(mode: str) -> type[TunnelStrategy]:
-    """
-    Map CONFIG['MODE'] to its Strategy class.
-
-    >>> strategy_cls = get_strategy("sni_fronted")
-    >>> tunnel = strategy_cls(cfg).establish()
-    """
     table = {
         "direct":       DirectStrategy,
         "http_payload": HttpPayloadStrategy,

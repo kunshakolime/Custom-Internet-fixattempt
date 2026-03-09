@@ -188,6 +188,7 @@ def main() -> None:
         run_tap(
             resolved_bypass_ips=resolved_bypass_ips,
             socks_port=CONFIG["local_socks_port"],
+            udpgw_addr=CONFIG.get("udpgw", ""),
         )
     except KeyboardInterrupt:
         print("[*] Shutting down.")

@@ -186,14 +186,8 @@ def establish_ws_tunnel(
         if not block.endswith(b"\r\n\r\n"):
             block = block + b"\r\n\r\n"
 
-        print(f">> Sending block {i + 1}/{len(blocks)}:\n",
-              block.decode("latin1", errors="replace"), flush=True)
-
         sock.sendall(block)
-
         response = read_headers(sock)
-        print(f">> Response to block {i + 1}:\n",
-              response.decode("latin1", errors="replace"), flush=True)
 
         if _is_upgrade_response(response):
             print("[*] Tunnel established.")
@@ -216,5 +210,4 @@ def establish_ws_tunnel(
     # ------------------------------------------------------------------ #
     # 4. Return the live socket
     # ------------------------------------------------------------------ #
-    print("[*] WebSocket handshake complete – returning raw socket.")
     return sock
