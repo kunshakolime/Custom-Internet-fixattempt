@@ -8,12 +8,7 @@ ssh_username     = ""
 ssh_password     = ""
 local_socks_port = 1080
 front_domain     = ""                      # sni_fronted only
+udpgw = "127.0.0.1:7300"   # badvpn-udpgw on remote server, leave empty to disable
 
 # [host] → target host:port  |  [crlf] → \r\n  |  [split] → block boundary
-payload_template = """
-GET / HTTP/1.1[crlf]
-Host: [host][crlf]
-Connection: Upgrade[crlf]
-Upgrade: websocket[crlf]
-[crlf]
-"""
+payload_template = "GET / HTTP/1.1[crlf]Host: [host][crlf]Connection: Upgrade[crlf]Upgrade: websocket[crlf][crlf]"
