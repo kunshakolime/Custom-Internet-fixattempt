@@ -1,0 +1,28 @@
+## Changelog
+v1.0 → v1.1
+- Fix SSH banner consumed by read_headers() on second response call
+- Add _is_upgrade_response() to recognise both 101 and 200+Upgrade as terminal
+
+v1.1 → v1.2
+- Add [split] as a block separator for multi-request payloads
+- Drain intermediate response bodies (chunked + Content-Length) before sending next block
+- Raise ConnectionError immediately if all blocks exhausted without upgrade
+
+v1.2 → v2.0
+- Replace config.py with a configs/ folder; main.py auto-selects if one file present, otherwise prompts numbered menu at startup
+- Add --socks flag to main.py for SOCKS-only mode (no routing changes, cross-platform, no admin required)
+- Integrate tap.py into main.py: hosts are resolved once in main.py and passed as pre-resolved IPs into a new run_tap() entry point
+- Remove standalone entrypoint, internal resolve_host(), CONFIG import, and EXTRA_BYPASS_HOSTS from tap.py; it is now a library module only
+- start_tun2socks() now accepts socks_port as a parameter instead of reading from CONFIG
+
+v2.0 → v2.1
+- Fix UnicodeDecodeError on non-UTF-8 Windows locales by adding errors="replace" to all subprocess.run(text=True) calls in tap.py
+- Guard all result.stdout accesses in tap.py against None before calling splitlines()
+- Deduplicate netsh interface query into _netsh_interfaces() helper used by both raise_other_interface_metrics() and restore_interface_metrics()
+- Remove redundant second PowerShell call in wait_for_tun2socks_interface() that fetched adapter name separately from ifIndex
+- Remove SSH_PORT from config and entire call chain (main.py → connect_via_ws_and_start_socks → SSHOverWebSocket); socket is already connected before Paramiko sees it so the port was never used
+- Replace timeout-based _recv_all() in ssh_connector.py with _recv_exactly(n) that reads a precise number of bytes; fixes fragile SOCKS4 handshake parsing on slow connections
+- Remove dead ver variable and slow bytes([x]) concat loop in _handle_socks4(); domain now read into a bytearray directly
+- Remove unused ssh_port attribute from SSHOverWebSocket.__init__()
+- Clean up start_ssh_transport() by removing stale commented-out host key block
+- Switch to .toml

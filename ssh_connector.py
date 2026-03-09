@@ -9,34 +9,15 @@ class SSHOverWebSocket:
     WebSocket-upgraded socket, plus a local SOCKS server.
     """
 
-    def __init__(self, ws_socket, ssh_username, ssh_password, ssh_port=22):
-        """
-        ws_socket: the raw connected socket from the WS tunnel
-        ssh_username / ssh_password: credentials
-        ssh_port: the 'real' SSH port the server is listening on (often 22).
-                  Some SSH-over-WebSocket providers might ignore it,
-                  but we pass it anyway to Paramiko connect().
-        """
+    def __init__(self, ws_socket, ssh_username, ssh_password):
         self.ws_socket = ws_socket
         self.ssh_username = ssh_username
         self.ssh_password = ssh_password
-        self.ssh_port = ssh_port
         self.transport = None
 
     def start_ssh_transport(self):
-        """
-        Initialize Paramiko Transport over the raw ws_socket,
-        authenticate with the given credentials.
-        """
         self.transport = paramiko.Transport(self.ws_socket)
         self.transport.start_client()
-
-        # You might want to do hostkey checks here, e.g.:
-        # server_key = self.transport.get_remote_server_key()
-        # if not verify_host_key(server_key):
-        #     raise Exception("Unknown Host Key!")
-
-        # Password-based auth
         self.transport.auth_password(self.ssh_username, self.ssh_password)
         if not self.transport.is_authenticated():
             raise Exception("SSH Authentication failed")
@@ -111,17 +92,15 @@ class SSHOverWebSocket:
             src.close()
 
     def _open_ssh_channel(self, client_sock, host, port):
-        """
-        Open a Paramiko 'direct-tcpip' channel to (host, port) and
-        forward data in both directions.
-        """
-        print(f"[*] Opening SSH channel to {host}:{port}")
-        chan = self.transport.open_channel(
-            "direct-tcpip",
-            (host, port),
-            client_sock.getsockname()
-        )
-        # Start bidirectional forwarding
+        try:
+            chan = self.transport.open_channel(
+                "direct-tcpip",
+                (host, port),
+                client_sock.getsockname()
+            )
+        except paramiko.ChannelException as e:
+            client_sock.close()
+            return
         threading.Thread(target=self._forward_data, args=(client_sock, chan), daemon=True).start()
         threading.Thread(target=self._forward_data, args=(chan, client_sock), daemon=True).start()
 
@@ -138,34 +117,25 @@ class SSHOverWebSocket:
         # then a null-terminated userID
         # if IP is 0.0.0.x => we read the domain after userID, also null-terminated
         try:
-            data = self._recv_all(client_sock)
-            if len(data) < 9:
-                client_sock.close()
-                return
-            ver = data[0]
-            cmd = data[1]
-            port = struct.unpack('>H', data[2:4])[0]
-            ip_part = data[4:8]
+            header = self._recv_exactly(client_sock, 8)
+            cmd     = header[1]
+            port    = struct.unpack('>H', header[2:4])[0]
+            ip_part = header[4:8]
+            host    = socket.inet_ntoa(ip_part)
 
-            # parse userID (null-terminated)
-            idx = 8
-            user_id = b""
-            while idx < len(data) and data[idx] != 0:
-                user_id += bytes([data[idx]])
-                idx += 1
-            idx += 1  # skip the null
+            # consume null-terminated userID
+            while client_sock.recv(1) not in (b'\x00', b''):
+                pass
 
-            # By default, interpret IP
-            host = socket.inet_ntoa(ip_part)
-
-            # If ip_part is 0.0.0.x => possible socks4a => read the domain
+            # SOCKS4a: IP is 0.0.0.x → domain follows userID
             if ip_part[:3] == b'\x00\x00\x00' and ip_part[3] != 0:
-                # There's a domain after the userID's null
-                domain_part = b""
-                while idx < len(data) and data[idx] != 0:
-                    domain_part += bytes([data[idx]])
-                    idx += 1
-                host = domain_part.decode('utf-8', errors='replace')
+                domain = bytearray()
+                while True:
+                    b = client_sock.recv(1)
+                    if b in (b'\x00', b''):
+                        break
+                    domain += b
+                host = domain.decode('utf-8', errors='replace')
 
             if cmd != 1:
                 # only CONNECT is supported
@@ -291,37 +261,20 @@ class SSHOverWebSocket:
         success = b"\x05\x00\x00\x01\x00\x00\x00\x00\x00\x00"
         client_sock.sendall(success)
 
-    def _recv_all(self, sock, timeout=0.5):
-        """
-        Helper to read as much as possible from a SOCKS4 handshake,
-        then return the entire chunk.  We set a small timeout to
-        avoid blocking forever if the client stops sending.
-        """
-        sock.settimeout(timeout)
-        data = b""
-        while True:
-            try:
-                chunk = sock.recv(4096)
-                if not chunk:
-                    break
-                data += chunk
-                # If it's a large handshake, keep reading until a short pause
-            except socket.timeout:
-                # no more data (just a short read)
-                break
-            except:
-                break
-        sock.settimeout(None)
-        return data
+    def _recv_exactly(self, sock, n: int) -> bytes:
+        """Read exactly n bytes, raising if the connection closes early."""
+        buf = b""
+        while len(buf) < n:
+            chunk = sock.recv(n - len(buf))
+            if not chunk:
+                raise ConnectionError("Socket closed during SOCKS handshake")
+            buf += chunk
+        return buf
 
 
-def connect_via_ws_and_start_socks(ws_socket, ssh_user, ssh_password, ssh_port, local_socks_port):
-    """
-    A convenience function:
-      1) Start SSH transport over the ws_socket
-      2) Start a local SOCKS proxy
-    """
-    connector = SSHOverWebSocket(ws_socket, ssh_user, ssh_password, ssh_port)
+def connect_via_ws_and_start_socks(ws_socket, ssh_user, ssh_password, local_socks_port):
+    """Start SSH transport over ws_socket and open a local SOCKS proxy."""
+    connector = SSHOverWebSocket(ws_socket, ssh_user, ssh_password)
     connector.start_ssh_transport()
     connector.open_socks_proxy(local_socks_port)
     # Keep the object in scope so it’s not garbage-collected
