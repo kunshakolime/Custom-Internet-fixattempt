@@ -20,9 +20,20 @@ v2.0 → v2.1
 - Guard all result.stdout accesses in tap.py against None before calling splitlines()
 - Deduplicate netsh interface query into _netsh_interfaces() helper used by both raise_other_interface_metrics() and restore_interface_metrics()
 - Remove redundant second PowerShell call in wait_for_tun2socks_interface() that fetched adapter name separately from ifIndex
-- Remove SSH_PORT from config and entire call chain (main.py → connect_via_ws_and_start_socks → SSHOverWebSocket); socket is already connected before Paramiko sees it so the port was never used
-- Replace timeout-based _recv_all() in ssh_connector.py with _recv_exactly(n) that reads a precise number of bytes; fixes fragile SOCKS4 handshake parsing on slow connections
-- Remove dead ver variable and slow bytes([x]) concat loop in _handle_socks4(); domain now read into a bytearray directly
+- Remove SSH_PORT from config and entire call chain; socket is already connected before Paramiko sees it so the port was never used
+- Replace timeout-based _recv_all() in ssh_connector.py with _recv_exactly(n); fixes fragile SOCKS4 handshake parsing on slow connections
+- Remove dead ver variable and slow bytes([x]) concat loop in _handle_socks4()
 - Remove unused ssh_port attribute from SSHOverWebSocket.__init__()
 - Clean up start_ssh_transport() by removing stale commented-out host key block
-- Switch to .toml
+- Switch configs from .py to .toml; eliminates __pycache__ and removes importlib dependency
+- Collapse PROXY_HOST+PROXY_PORT and TARGET_HOST+TARGET_PORT into single host:port strings in config; split once in main.py
+- Suppress Paramiko channel failure log noise via logging.getLogger("paramiko").setLevel(CRITICAL)
+- Add set_keepalive(60) on SSH transport to detect dead connections early
+- Silence noisy [*] Opening SSH channel print; catch ChannelException in _open_ssh_channel to fail cleanly per channel
+
+v2.1 → v3.0
+- Replace Go-based tun2socks with badvpn-tun2socks for native udpgw support
+- Add udpgw key to toml config; pass through main.py → run_tap() → start_tun2socks()
+- Fix badvpn Windows --tundev format: tap0901:<adapter>:<TAP-IP>:<network>:<netmask>
+- Add --udpgw-remote-server-addr flag to badvpn launch when udpgw is configured
+- Remove SOCKS5 UDP ASSOCIATE handling from ssh_connector.py; UDP is now handled entirely by badvpn+udpgw without touching the SOCKS server
